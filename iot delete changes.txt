@@ -1,0 +1,41 @@
+import boto3
+from datetime import datetime, timedelta
+import json
+
+ec2_client = boto3.client('ec2')
+sns_client = boto3.client('sns')
+
+def lambda_handler(event, context):
+    # Assume event contains the date to clean up in YYYY-MM-DD format
+    date_to_cleanup = event['date']
+    date_to_cleanup = datetime.strptime(date_to_cleanup, '%Y-%m-%d')
+    
+    # Find instances created on the specific date
+    instances_to_delete = []
+    reservations = ec2_client.describe_instances().get('Reservations', [])
+    
+    for reservation in reservations:
+        for instance in reservation['Instances']:
+            launch_time = instance['LaunchTime']
+            # Compare the date part only
+            if launch_time.date() == date_to_cleanup.date():
+                instances_to_delete.append(instance['InstanceId'])
+    
+    # Delete the identified instances
+    if instances_to_delete:
+        ec2_client.terminate_instances(InstanceIds=instances_to_delete)
+        message = f"Terminated instances: {instances_to_delete}"
+    else:
+        message = "No instances found to terminate."
+    
+    # Send SNS notification
+    sns_client.publish(
+        TopicArn='arn:aws:sns:region:account-id:topic-name',
+        Message=message,
+        Subject='AWS Cleanup Status'
+    )
+    
+    return {
+        'statusCode': 200,
+        'body': json.dumps(message)
+    }
